@@ -1,5 +1,8 @@
 #[cfg(feature="tgbot")]
 pub mod tgbot;
-mod sd;
-mod base;
+
+#[cfg(feature="sd")]
+pub mod sd;
+
+pub mod base;
 

@@ -6,7 +6,7 @@ pub mod bot_structs {
     use frankenstein::{Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams, Message, MethodResponse, SendDocumentParams, SendMessageParams, SetMyCommandsParams};
     use regex::Regex;
     use serde::{Deserialize, Serialize};
-    use crate::base::GenericResult;
+    use crate::base::base::GenericResult;
 
     pub struct BotCommand {
         command: String,
@@ -151,7 +151,7 @@ pub mod bot_processing {
     use frankenstein::{BotCommandScope, BotCommand as BotMCommand, BotCommandScopeChat, CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyMarkup, SendMessageParams, SetMyCommandsParams};
     use tokio::sync::{RwLock, RwLockReadGuard};
     use tracing::info;
-    use crate::base::GenericResult;
+    use crate::base::base::GenericResult;
     use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, Step, StepExecutionResult, UserInfo};
 
     static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;

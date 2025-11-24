@@ -2,7 +2,7 @@
 #[cfg(feature = "sd")]
 pub mod sd {
     use serde::{Deserialize, Serialize};
-    use crate::base::GenericResult;
+    use crate::base::base::GenericResult;
 
     pub fn safe_deserializer<TResponse> (data: String) -> GenericResult<TResponse>
     where
