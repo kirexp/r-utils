@@ -2,8 +2,10 @@
 pub mod bot_structs {
     use std::future::Future;
     use std::pin::Pin;
+    use async_trait::async_trait;
     use frankenstein::{Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams, Message, MethodResponse, SendDocumentParams, SendMessageParams, SetMyCommandsParams};
     use regex::Regex;
+    use serde::{Deserialize, Serialize};
     use crate::base::GenericResult;
 
     pub struct BotCommand {
@@ -93,4 +95,270 @@ pub mod bot_structs {
         pub user_name: Option<String>,
         pub file_content: Option<Box<Document>>,
     }
+
+    #[derive(Serialize, Deserialize, Debug)]
+    pub struct UserInfo {
+        pub phone: String,
+        pub chat_id: i64,
+        pub user_name: String
+    }
+    impl UserInfo {
+        pub fn new (phone: String, chat_id: i64, user_name: String) -> Self {
+            Self {
+                phone,
+                chat_id,
+                user_name
+            }
+        }
+    }
+
+    pub trait GetStateMachineName {
+        fn get_name(&self) -> &'static str;
+        fn get_name_st() -> &'static str
+        where
+            Self: Sized;
+    }
+
+    #[async_trait]
+    pub trait ProcessNext {
+        async fn process_next(&mut self, chat_id: i64, message: Option<String>) -> GenericResult<Step>;
+    }
+
+    pub trait ClonableStateMachine {
+        fn clone_box(&self) -> Box<dyn ProcessStateMachine + Send>;
+    }
+
+
+    #[async_trait]
+    pub trait ProcessStateMachine: GetStateMachineName + ProcessNext + FinishStateMachine + ClonableStateMachine + Send {
+    }
+
+    #[async_trait]
+    pub trait FinishStateMachine {
+        async fn finish(&self) -> GenericResult<()>;
+    }
+
+
+}
+
+
+#[cfg(feature="tgbot")]
+pub mod bot_processing {
+
+    use std::collections::HashMap;
+    use std::sync::{Arc, Once, ONCE_INIT};
+    use async_trait::async_trait;
+    use frankenstein::{BotCommandScope, BotCommand as BotMCommand, BotCommandScopeChat, CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyMarkup, SendMessageParams, SetMyCommandsParams};
+    use tokio::sync::{RwLock, RwLockReadGuard};
+    use tracing::info;
+    use crate::base::GenericResult;
+    use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, Step, StepExecutionResult, UserInfo};
+
+    static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;
+    static ONCE: Once = ONCE_INIT;
+    pub struct StateMachineRepo {
+        pub state_machines: Arc<RwLock<HashMap<i64, Box<dyn ProcessStateMachine + Send + Sync>>>>,
+    }
+
+    impl StateMachineRepo {
+        fn new () -> Self {
+            Self {
+                state_machines: Arc::new(RwLock::new(HashMap::new())),
+            }
+        }
+        pub fn get_instance () -> &'static StateMachineRepo {
+            unsafe {
+                ONCE.call_once(|| {
+                    SINGLETON_INSTANCE = Some(StateMachineRepo::new());
+                });
+                // SAFETY: The unsafe block ensures the lifetime of the reference is correct.
+                SINGLETON_INSTANCE.as_ref().unwrap()
+            }
+        }
+
+        pub async fn check_active_task_sm(&self, chat_id: i64) -> Option<Box<dyn ProcessStateMachine + Send>> {
+            let state_machines_read = self.state_machines.read().await;
+            let potential_sm = state_machines_read.get(&chat_id)?.clone_box();
+            drop(state_machines_read);
+            Some(potential_sm)
+        }
+
+        pub async fn init_state_machine(&self, chat_id: i64, state_machine: impl ProcessStateMachine + Send + Sync + 'static) -> GenericResult<()> {
+            let new_sm: Box<dyn ProcessStateMachine + Send + Sync> = Box::new(state_machine);
+            let mut write_state = self.state_machines.write().await;
+            write_state.insert(chat_id, new_sm);
+            Ok(())
+        }
+
+        pub async fn complete_state_machine(&self, chat_id: i64) -> GenericResult<()> {
+            let mut write_state = self.state_machines.write().await;
+            write_state.remove(&chat_id);
+            Ok(())
+        }
+    }
+
+    pub struct GlobalStateMachine {
+        pub users: Arc<RwLock<HashMap<i64, UserInfo>>>,
+        pub temp_messages: Arc<RwLock<HashMap<i32, String>>>,
+        pub commands: Vec<BotCommand>,
+    }
+
+    impl GlobalStateMachine {
+        pub fn new (users_from_db: HashMap<i64, UserInfo>, commands: Vec<BotCommand>) -> Self {
+            Self {
+                users: Arc::new(RwLock::new(users_from_db)),
+                temp_messages: Arc::new(RwLock::new(HashMap::new())),
+                commands
+            }
+        }
+
+        pub async fn process_message(
+            &self,
+            msg: Option<Message>,
+            cq: Option<CallbackQuery>,
+            auth_processor: Box<dyn AuthenticationProcessor>
+        ) -> GenericResult<StepExecutionResult> {
+            match (msg, cq) {
+                (Some(msg), _) => {
+                    let file_content = msg.document;
+                    let p = MessageWrapper { m_text: msg.text, chat_id: msg.chat.id, contact: msg.contact, user_name: msg.chat.username, file_content };
+                    Ok(self.process_message_sm(p, auth_processor).await?)
+                }
+                (_, Some(cq)) => {
+                    let p = MessageWrapper { m_text: cq.data, chat_id: cq.from.id as i64, contact: None, user_name: cq.from.username, file_content: None };
+                    Ok(self.process_message_sm(p, auth_processor).await?)
+                }
+                _ => {
+                    panic!()
+                }
+            }
+        }
+
+        async fn process_message_sm(&self,
+                                    message_to_process: MessageWrapper,
+                                    auth_processor: Box<dyn AuthenticationProcessor>) -> GenericResult<StepExecutionResult> {
+            let chat_id = message_to_process.chat_id;
+            let text = message_to_process.m_text.clone().unwrap_or(String::new());
+            let sm_repo = StateMachineRepo::get_instance();
+            let lock_session_data = self.users.read().await;
+            if !lock_session_data.contains_key(&chat_id)
+                && message_to_process.contact == None
+            {
+                let message_params = GetContactStep::execute(chat_id)?;
+                return Ok(StepExecutionResult::one(chat_id, ExecutionParam::SendMessage(message_params)));
+            }
+            if let Some(value) = auth_processor.process(&message_to_process, chat_id.clone(), lock_session_data).await {
+                return value;
+            }
+            let message_text = message_to_process.m_text.clone();
+            if(message_text.is_some() && message_text.unwrap().to_lowercase() == "/cancel") {
+                sm_repo.complete_state_machine(chat_id).await?;
+                let send_message_params = SendMessageParams::builder()
+                    .chat_id(chat_id)
+                    .text("Отмена процесса добавления/удаления")
+                    .build();
+                return Ok(StepExecutionResult::many(
+                    chat_id,
+                    vec![ExecutionParam::SendMessage(send_message_params)],
+                ));
+            }
+
+            if let Some(mut active_sm) = sm_repo.check_active_task_sm(chat_id).await {
+                let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone()).await?;
+                let sm_step_data = match sm_result {
+                    Step::Finit(result) => {
+                        active_sm.finish().await?;
+                        sm_repo.complete_state_machine(chat_id).await?;
+                        result
+                    },
+                    Step::WhatEver(result) => {
+                        result
+                    }
+                };
+
+                return Ok(sm_step_data)
+            }
+            return match self.process_bot_commands(chat_id, &text).await {
+                Some(execution_result) => {
+                    Ok(execution_result)
+                }
+                None => {
+                    match self.process_other_messages(chat_id, &message_to_process).await {
+                        Some(step_exec_result) => Ok(step_exec_result),
+                        None => {
+                            let not_implemented_params = SendMessageParams::builder()
+                                .chat_id(message_to_process.chat_id)
+                                .text("Не реализовано!")
+                                .build();
+                            Ok(StepExecutionResult::one(chat_id, ExecutionParam::SendMessage(not_implemented_params)))
+                        }
+                    }
+                }
+            };
+        }
+
+        async fn process_other_messages(&self, chat_id: i64, message: &MessageWrapper) -> Option<StepExecutionResult> {
+            None
+        }
+
+        async fn process_bot_commands(&self, chat_id: i64, command: &String) -> Option<StepExecutionResult>{
+            for bot_command in &self.commands {
+                let command_arc = Arc::new(command.clone());
+                if bot_command.check_pattern(command_arc.as_str()) {
+                    info!("Bot command was identified as {command_arc}. Starting execution");
+                    let result = (bot_command.action)(chat_id, command.clone()).await;
+                    return match result {
+                        Ok(r) => {
+                            info!("{command_arc}. Finishing execution");
+                            return r;
+                        },
+                        Err(err) => {
+                            info!("{command_arc}. Execution failed with error: {err}");
+                            None
+                        }
+                    };
+                }
+            }
+            None
+        }
+    }
+
+
+    pub struct GetContactStep;
+
+    impl GetContactStep {
+        pub fn execute(chat_id: i64) -> Result<SendMessageParams, String> {
+            let mut keyboard: Vec<Vec<KeyboardButton>> = Vec::new();
+            let mut vek: Vec<KeyboardButton> = Vec::new();
+
+            vek.push(
+                KeyboardButton::builder()
+                    .text("Поделиться контактом")
+                    .request_contact(true)
+                    .build(),
+            );
+            keyboard.push(vek);
+            let keyboard_markup = ReplyKeyboardMarkup::builder()
+                .keyboard(keyboard)
+                .resize_keyboard(true)
+                .one_time_keyboard(true)
+                .build();
+
+            let send_message_params = SendMessageParams::builder()
+                .chat_id(chat_id)
+                .text("Для продолжения, Вам нужно поделиться с ботом контактными данными!")
+                .reply_markup(ReplyMarkup::ReplyKeyboardMarkup(keyboard_markup))
+                .build();
+            return Ok(send_message_params);
+        }
+    }
+
+    #[async_trait]
+    pub trait AuthenticationProcessor {
+        async fn process (&self, message_to_process: &MessageWrapper, chat_id: i64,
+                        lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>>;
+    }
+
+
+
 }
