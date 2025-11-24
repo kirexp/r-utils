@@ -355,8 +355,8 @@ pub mod bot_processing {
     #[async_trait]
     pub trait AuthenticationProcessor: Sync + Send {
         async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64) -> Option<GenericResult<StepExecutionResult>>;
-        
-        fn has_user(&self, user_id: &i64) -> bool;
+
+        async fn has_user(&self, user_id: &i64) -> bool;
     }
 
 
@@ -430,7 +430,7 @@ pub mod bot_processing {
                 todo!()
             }
 
-            fn has_user(&self, user_id: &i64) -> bool {
+            async fn has_user(&self, user_id: &i64) -> bool {
                 false
             }
         }
