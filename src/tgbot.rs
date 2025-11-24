@@ -239,7 +239,7 @@ pub mod bot_processing {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
             let sm_repo = StateMachineRepo::get_instance();
-            let has_session_info = self.auth_processor.has_user(&chat_id);
+            let has_session_info = self.auth_processor.has_user(&chat_id).await;
             if !has_session_info
                 && message_to_process.contact == None
             {
