@@ -15,6 +15,7 @@ default=["all"]
 
 
 [dependencies]
+bot-macros = {path = "./bot_macros", package = "bot_macros"}
 regex = "1.10.4"
 frankenstein = { version = "0.30", default-features = false, features = ["async-http-client"] }
 serde = "1.0.200"

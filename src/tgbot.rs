@@ -141,7 +141,6 @@ pub mod bot_structs {
 
 }
 
-
 #[cfg(feature="tgbot")]
 pub mod bot_processing {
 
@@ -354,8 +353,8 @@ pub mod bot_processing {
     }
 
     #[async_trait]
-    pub trait AuthenticationProcessor : Sync + Send {
-        async fn process (&self, message_to_process: &MessageWrapper, chat_id: i64,
+    pub trait AuthenticationProcessor: Sync + Send {
+        async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64,
                         lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>>;
     }
 
@@ -413,5 +412,26 @@ pub mod bot_processing {
     }
 
 
+    #[cfg(test)]
+    mod tests {
+        use std::collections::HashMap;
+        use async_trait::async_trait;
+        use tokio::sync::RwLockReadGuard;
+        use crate::base::base::GenericResult;
+        use crate::tgbot::bot_processing::AuthenticationProcessor;
+        use crate::tgbot::bot_structs::{MessageWrapper, StepExecutionResult, UserInfo};
+
+        pub struct AuthProcessor;
+
+        #[async_trait]
+        impl AuthenticationProcessor for AuthProcessor {
+            async fn process(&self, message_to_process: &MessageWrapper, chat_id: i64, lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>> {
+                todo!()
+            }
+        }
+    }
 
 }
+
+#[cfg(feature="tgbot")]
+pub use bot_macros::*;
