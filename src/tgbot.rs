@@ -197,15 +197,15 @@ pub mod bot_processing {
     }
 
     pub struct GlobalStateMachine {
-        pub users: Arc<RwLock<HashMap<i64, UserInfo>>>,
+        pub auth_processor: Arc<dyn AuthenticationProcessor>,
         pub temp_messages: Arc<RwLock<HashMap<i32, String>>>,
         pub commands: Vec<BotCommand>,
     }
 
     impl GlobalStateMachine {
-        pub fn new (users_from_db: HashMap<i64, UserInfo>, commands: Vec<BotCommand>) -> Self {
+        pub fn new (auth_processor: Arc<dyn AuthenticationProcessor>, commands: Vec<BotCommand>) -> Self {
             Self {
-                users: Arc::new(RwLock::new(users_from_db)),
+                auth_processor,
                 temp_messages: Arc::new(RwLock::new(HashMap::new())),
                 commands
             }
@@ -239,14 +239,14 @@ pub mod bot_processing {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
             let sm_repo = StateMachineRepo::get_instance();
-            let lock_session_data = self.users.read().await;
-            if !lock_session_data.contains_key(&chat_id)
+            let has_session_info = self.auth_processor.has_user(&chat_id);
+            if !has_session_info
                 && message_to_process.contact == None
             {
                 let message_params = GetContactStep::execute(chat_id)?;
                 return Ok(StepExecutionResult::one(chat_id, ExecutionParam::SendMessage(message_params)));
             }
-            if let Some(value) = auth_processor.process(&message_to_process, chat_id.clone(), lock_session_data).await {
+            if let Some(value) = auth_processor.process(&message_to_process, chat_id.clone(), ).await {
                 return value;
             }
             let message_text = message_to_process.m_text.clone();
@@ -354,8 +354,9 @@ pub mod bot_processing {
 
     #[async_trait]
     pub trait AuthenticationProcessor: Sync + Send {
-        async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64,
-                        lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>>;
+        async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64) -> Option<GenericResult<StepExecutionResult>>;
+        
+        fn has_user(&self, user_id: &i64) -> bool;
     }
 
 
@@ -425,8 +426,12 @@ pub mod bot_processing {
 
         #[async_trait]
         impl AuthenticationProcessor for AuthProcessor {
-            async fn process(&self, message_to_process: &MessageWrapper, chat_id: i64, lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>> {
+            async fn process(&self, message_to_process: &MessageWrapper, chat_id: i64) -> Option<GenericResult<StepExecutionResult>> {
                 todo!()
+            }
+
+            fn has_user(&self, user_id: &i64) -> bool {
+                false
             }
         }
     }
