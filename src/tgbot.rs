@@ -151,8 +151,8 @@ pub mod bot_processing {
     use frankenstein::{BotCommandScope, BotCommand as BotMCommand, BotCommandScopeChat, CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyMarkup, SendMessageParams, SetMyCommandsParams};
     use tokio::sync::{RwLock, RwLockReadGuard};
     use tracing::info;
-    use crate::base::base::GenericResult;
-    use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, Step, StepExecutionResult, UserInfo};
+    use crate::base::base::{GenericError, GenericResult};
+    use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, SendResult, Step, StepExecutionResult, UserInfo};
 
     static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;
     static ONCE: Once = ONCE_INIT;
@@ -216,7 +216,7 @@ pub mod bot_processing {
             &self,
             msg: Option<Message>,
             cq: Option<CallbackQuery>,
-            auth_processor: Box<dyn AuthenticationProcessor>
+            auth_processor: Arc<dyn AuthenticationProcessor + Send + Sync>,
         ) -> GenericResult<StepExecutionResult> {
             match (msg, cq) {
                 (Some(msg), _) => {
@@ -236,7 +236,7 @@ pub mod bot_processing {
 
         async fn process_message_sm(&self,
                                     message_to_process: MessageWrapper,
-                                    auth_processor: Box<dyn AuthenticationProcessor>) -> GenericResult<StepExecutionResult> {
+                                    auth_processor: Arc<dyn AuthenticationProcessor>) -> GenericResult<StepExecutionResult> {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
             let sm_repo = StateMachineRepo::get_instance();
@@ -354,9 +354,62 @@ pub mod bot_processing {
     }
 
     #[async_trait]
-    pub trait AuthenticationProcessor {
+    pub trait AuthenticationProcessor : Sync + Send {
         async fn process (&self, message_to_process: &MessageWrapper, chat_id: i64,
                         lock_session_data: RwLockReadGuard<'_, HashMap<i64, UserInfo>>) -> Option<GenericResult<StepExecutionResult>>;
+    }
+
+
+    use frankenstein::{AsyncApi, AsyncTelegramApi, DeleteMyCommandsParams};
+    use tracing::error;
+
+    pub fn process_message (api: AsyncApi, state: &Arc<GlobalStateMachine>,
+                            message: Option<Message>,
+                            callback_query: Option<CallbackQuery>,
+                            auth_processor: Arc<dyn AuthenticationProcessor+Send+Sync>
+    ) -> Result<SendResult, GenericError> {
+        let api_clone = api;
+        let sm = Arc::clone(&state);
+        {
+            let cloned_state = state.clone();
+            let auth_processor = auth_processor.clone();
+            tokio::spawn(async move {
+                let auth_processor = auth_processor.clone();
+                let cloned_state = cloned_state.clone();
+                let step_execution_result = sm.process_message(message, callback_query, auth_processor).await.unwrap();
+                for execution_param in step_execution_result.result {
+                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param).await;
+                    if let Err(error) = send_result {
+                        error!("Failed to send message: {error:?}");
+                    }
+                }
+            });
+            return Ok(SendResult)
+        }
+    }
+
+    async fn send_message(api_clone: &AsyncApi, cloned_state: &Arc<GlobalStateMachine>, chat_id: i64, execution_param: &ExecutionParam) -> Result<SendResult, GenericError>{
+        let result: SendResult = match execution_param {
+            ExecutionParam::SendMessage(message_params) => api_clone.send_message(&message_params).await?.into(),
+            ExecutionParam::SendAndStoreMessage(message_params) => {
+                let result = api_clone.send_message(&message_params).await?;
+                let cloned_state = cloned_state.clone();
+                let mut locked = cloned_state.temp_messages.write().await;
+                locked.insert(result.result.message_id, message_params.text.to_string());
+                result.into()
+            }
+            ExecutionParam::SendMenu(menu_params) => {
+                let delete_params = DeleteMyCommandsParams::builder()
+                    .scope(BotCommandScope::Chat(BotCommandScopeChat::builder().chat_id(chat_id).build())).build();
+                api_clone.delete_my_commands(&delete_params).await?;
+                api_clone.set_my_commands(&menu_params).await?.into()
+            }
+            ExecutionParam::SendFile(file_params) => api_clone.send_document(&file_params).await?.into(),
+            ExecutionParam::RemoveMessage(remove_message) => api_clone.delete_message(&remove_message).await?.into(),
+            ExecutionParam::SendEditMessage(edit_message) => api_clone.edit_message_text(&edit_message).await?.into(),
+        };
+
+        return Ok(result)
     }
 
 
