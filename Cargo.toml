@@ -1,0 +1,22 @@
+[package]
+name = "kexp-utils"
+version = "0.1.0"
+edition = "2021"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[features]
+base=[]
+tgbot=["base"]
+all=["tgbot", "base", "sd"]
+sd=["base"]
+
+default=["all"]
+
+
+[dependencies]
+regex = "1.10.4"
+frankenstein = { version = "0.30", default-features = false, features = ["async-http-client"] }
+serde = "1.0.200"
+serde_json = "1.0.116"
+serde_path_to_error = "0.1"
