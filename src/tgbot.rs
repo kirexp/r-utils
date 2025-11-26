@@ -379,20 +379,25 @@ pub mod bot_processing {
     pub fn process_message (api: AsyncApi, state: &Arc<GlobalStateMachine>,
                             message: Option<Message>,
                             callback_query: Option<CallbackQuery>,
-                            auth_processor: Arc<dyn AuthenticationProcessor+Send+Sync>,
     ) -> Result<SendResult, GenericError> {
         let api_clone = api;
         let sm = Arc::clone(&state);
         {
             let cloned_state = state.clone();
-            let auth_processor = auth_processor.clone();
             tokio::spawn(async move {
                 let cloned_state = cloned_state.clone();
-                let step_execution_result = sm.process_message(message, callback_query).await.unwrap();
-                for execution_param in step_execution_result.result {
-                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param).await;
-                    if let Err(error) = send_result {
-                        error!("Failed to send message: {error:?}");
+                let step_execution_result = sm.process_message(message, callback_query).await;
+                match step_execution_result {
+                    Ok(result) => {
+                        for execution_param in result.result {
+                            let send_result = send_message(&api_clone, &cloned_state, result.chat_id, &execution_param).await;
+                            if let Err(error) = send_result {
+                                error!("Failed to send message: {error:?}");
+                            }
+                        }
+                    },
+                    Err(err) => {
+
                     }
                 }
             });
