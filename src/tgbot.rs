@@ -390,7 +390,7 @@ pub mod bot_processing {
                 let cloned_state = cloned_state.clone();
                 let step_execution_result = sm.process_message(message, callback_query, auth_processor).await.unwrap();
                 for execution_param in step_execution_result.result {
-                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param, temp_message_processor.clone()).await;
+                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param).await;
                     if let Err(error) = send_result {
                         error!("Failed to send message: {error:?}");
                     }
@@ -401,13 +401,13 @@ pub mod bot_processing {
     }
 
     async fn send_message(api_clone: &AsyncApi, cloned_state: &Arc<GlobalStateMachine>, chat_id: i64, execution_param: &ExecutionParam,
-                          temp_message_processor: Arc<dyn TemporaryMessageProvider>
     ) -> Result<SendResult, GenericError>{
         let result: SendResult = match execution_param {
             ExecutionParam::SendMessage(message_params) => api_clone.send_message(&message_params).await?.into(),
             ExecutionParam::SendAndStoreMessage(message_params) => {
                 let result = api_clone.send_message(&message_params).await?;
-                temp_message_processor.store_message(chat_id, message_params.text.to_string(), result.result.message_id as i64)?;
+                let cloned_state = cloned_state.clone();
+                cloned_state.temp_message_processor.store_message(chat_id, message_params.text.to_string(), result.result.message_id as i64)?;
                 result.into()
             }
             ExecutionParam::SendMenu(menu_params) => {
