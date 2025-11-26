@@ -14,7 +14,7 @@ pub mod bot_structs {
     #[async_trait]
     pub trait TemporaryMessageProvider: Send + Sync {
         async fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> GenericResult<()>;
-        async fn get_message (&self, chat_id: i64) -> GenericResult<TemporaryMessage>;
+        async fn get_message (&self, chat_id: i64) -> Option<TemporaryMessage>;
     }
 
     pub struct BotCommand {
