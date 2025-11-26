@@ -2,6 +2,7 @@
 pub mod bot_structs {
     use std::future::Future;
     use std::pin::Pin;
+    use std::sync::Arc;
     use async_trait::async_trait;
     use frankenstein::{Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams, Message, MethodResponse, SendDocumentParams, SendMessageParams, SetMyCommandsParams};
     use regex::Regex;
@@ -131,7 +132,7 @@ pub mod bot_structs {
 
     #[async_trait]
     pub trait ProcessNext {
-        async fn process_next(&mut self, chat_id: i64, message: Option<String>) -> GenericResult<Step>;
+        async fn process_next(&mut self, chat_id: i64, message: Option<String>, temp_message_processor: Arc<dyn TemporaryMessageProvider>) -> GenericResult<Step>;
     }
 
     pub trait ClonableStateMachine {
@@ -276,7 +277,7 @@ pub mod bot_processing {
             }
 
             if let Some(mut active_sm) = sm_repo.check_active_task_sm(chat_id).await {
-                let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone()).await?;
+                let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone(), self.temp_message_processor.clone()).await?;
                 let sm_step_data = match sm_result {
                     Step::Finit(result) => {
                         active_sm.finish().await?;
