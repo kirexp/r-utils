@@ -159,7 +159,7 @@ pub mod bot_processing {
     use std::sync::{Arc, Once, ONCE_INIT};
     use async_trait::async_trait;
     use frankenstein::{BotCommandScope, BotCommand as BotMCommand, BotCommandScopeChat, CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyMarkup, SendMessageParams, SetMyCommandsParams};
-    use tokio::sync::{RwLock, RwLockReadGuard};
+    use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
     use tracing::info;
     use crate::base::base::{GenericError, GenericResult};
     use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, SendResult, Step, StepExecutionResult, TemporaryMessageProvider, UserInfo};
@@ -167,7 +167,7 @@ pub mod bot_processing {
     static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;
     static ONCE: Once = ONCE_INIT;
     pub struct StateMachineRepo {
-        pub state_machines: Arc<RwLock<HashMap<i64, Box<dyn ProcessStateMachine + Send + Sync>>>>,
+        pub state_machines: Arc<RwLock<HashMap<i64, Arc<Mutex<dyn ProcessStateMachine + Send + Sync>>>>>,
     }
 
     impl StateMachineRepo {
@@ -186,15 +186,14 @@ pub mod bot_processing {
             }
         }
 
-        pub async fn check_active_task_sm(&self, chat_id: i64) -> Option<Box<dyn ProcessStateMachine + Send>> {
+        pub async fn check_active_task_sm(&self, chat_id: i64) -> Option<Arc<Mutex<dyn ProcessStateMachine + Send + Sync>>> {
             let state_machines_read = self.state_machines.read().await;
-            let potential_sm = state_machines_read.get(&chat_id)?.clone_box();
-            drop(state_machines_read);
-            Some(potential_sm)
+            let potential_sm = state_machines_read.get(&chat_id)?;
+            Some(Arc::clone(potential_sm))
         }
 
         pub async fn init_state_machine(&self, chat_id: i64, state_machine: impl ProcessStateMachine + Send + Sync + 'static) -> GenericResult<()> {
-            let new_sm: Box<dyn ProcessStateMachine + Send + Sync> = Box::new(state_machine);
+            let new_sm: Arc<Mutex<dyn ProcessStateMachine + Send + Sync>> = Arc::new(Mutex::new(state_machine));
             let mut write_state = self.state_machines.write().await;
             write_state.insert(chat_id, new_sm);
             Ok(())
@@ -275,6 +274,7 @@ pub mod bot_processing {
             }
 
             if let Some(mut active_sm) = sm_repo.check_active_task_sm(chat_id).await {
+                let mut active_sm = active_sm.lock().await;
                 let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone(), self.temp_message_processor.clone()).await?;
                 let sm_step_data = match sm_result {
                     Step::Finit(result) => {
@@ -386,7 +386,6 @@ pub mod bot_processing {
             let cloned_state = state.clone();
             let auth_processor = auth_processor.clone();
             tokio::spawn(async move {
-                let auth_processor = auth_processor.clone();
                 let cloned_state = cloned_state.clone();
                 let step_execution_result = sm.process_message(message, callback_query).await.unwrap();
                 for execution_param in step_execution_result.result {
