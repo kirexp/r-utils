@@ -11,9 +11,10 @@ pub mod bot_structs {
 
     pub struct TemporaryMessage { pub message_id: i64, pub text: String}
 
+    #[async_trait]
     pub trait TemporaryMessageProvider: Send + Sync {
-        fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> GenericResult<()>;
-        fn get_message (&self, chat_id: i64) -> GenericResult<TemporaryMessage>;
+        async fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> GenericResult<()>;
+        async fn get_message (&self, chat_id: i64) -> GenericResult<TemporaryMessage>;
     }
 
     pub struct BotCommand {
@@ -406,7 +407,7 @@ pub mod bot_processing {
             ExecutionParam::SendAndStoreMessage(message_params) => {
                 let result = api_clone.send_message(&message_params).await?;
                 let cloned_state = cloned_state.clone();
-                cloned_state.temp_message_processor.store_message(chat_id, message_params.text.to_string(), result.result.message_id as i64)?;
+                cloned_state.temp_message_processor.store_message(chat_id, message_params.text.to_string(), result.result.message_id as i64).await?;
                 result.into()
             }
             ExecutionParam::SendMenu(menu_params) => {
