@@ -8,6 +8,14 @@ pub mod bot_structs {
     use serde::{Deserialize, Serialize};
     use crate::base::base::GenericResult;
 
+
+    pub struct TemporaryMessage { pub message_id: i64, pub text: String}
+
+    pub trait TemporaryMessageProvider: Send + Sync {
+        fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> GenericResult<()>;
+        fn get_message (&self, chat_id: i64) -> GenericResult<TemporaryMessage>;
+    }
+
     pub struct BotCommand {
         command: String,
         pub action: Box<dyn Fn(i64, String) -> Pin<Box<dyn Future<Output=GenericResult<Option<StepExecutionResult>>> + Send>> + Send + Sync>,
@@ -151,7 +159,7 @@ pub mod bot_processing {
     use tokio::sync::{RwLock, RwLockReadGuard};
     use tracing::info;
     use crate::base::base::{GenericError, GenericResult};
-    use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, SendResult, Step, StepExecutionResult, UserInfo};
+    use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, SendResult, Step, StepExecutionResult, TemporaryMessageProvider, UserInfo};
 
     static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;
     static ONCE: Once = ONCE_INIT;
@@ -198,14 +206,16 @@ pub mod bot_processing {
 
     pub struct GlobalStateMachine {
         pub auth_processor: Arc<dyn AuthenticationProcessor>,
+        pub temp_message_processor: Arc<dyn TemporaryMessageProvider>,
         pub temp_messages: Arc<RwLock<HashMap<i32, String>>>,
         pub commands: Vec<BotCommand>,
     }
 
     impl GlobalStateMachine {
-        pub fn new (auth_processor: Arc<dyn AuthenticationProcessor>, commands: Vec<BotCommand>) -> Self {
+        pub fn new (auth_processor: Arc<dyn AuthenticationProcessor>, temp_message_processor: Arc<dyn TemporaryMessageProvider> , commands: Vec<BotCommand>) -> Self {
             Self {
                 auth_processor,
+                temp_message_processor,
                 temp_messages: Arc::new(RwLock::new(HashMap::new())),
                 commands
             }
@@ -215,7 +225,7 @@ pub mod bot_processing {
             &self,
             msg: Option<Message>,
             cq: Option<CallbackQuery>,
-            auth_processor: Arc<dyn AuthenticationProcessor + Send + Sync>,
+            auth_processor: Arc<dyn AuthenticationProcessor>,
         ) -> GenericResult<StepExecutionResult> {
             match (msg, cq) {
                 (Some(msg), _) => {
@@ -235,7 +245,8 @@ pub mod bot_processing {
 
         async fn process_message_sm(&self,
                                     message_to_process: MessageWrapper,
-                                    auth_processor: Arc<dyn AuthenticationProcessor>) -> GenericResult<StepExecutionResult> {
+                                    auth_processor: Arc<dyn AuthenticationProcessor>,
+        ) -> GenericResult<StepExecutionResult> {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
             let sm_repo = StateMachineRepo::get_instance();
@@ -366,7 +377,8 @@ pub mod bot_processing {
     pub fn process_message (api: AsyncApi, state: &Arc<GlobalStateMachine>,
                             message: Option<Message>,
                             callback_query: Option<CallbackQuery>,
-                            auth_processor: Arc<dyn AuthenticationProcessor+Send+Sync>
+                            auth_processor: Arc<dyn AuthenticationProcessor+Send+Sync>,
+                            temp_message_processor: Arc<dyn TemporaryMessageProvider>
     ) -> Result<SendResult, GenericError> {
         let api_clone = api;
         let sm = Arc::clone(&state);
@@ -378,7 +390,7 @@ pub mod bot_processing {
                 let cloned_state = cloned_state.clone();
                 let step_execution_result = sm.process_message(message, callback_query, auth_processor).await.unwrap();
                 for execution_param in step_execution_result.result {
-                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param).await;
+                    let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param, temp_message_processor.clone()).await;
                     if let Err(error) = send_result {
                         error!("Failed to send message: {error:?}");
                     }
@@ -388,14 +400,14 @@ pub mod bot_processing {
         }
     }
 
-    async fn send_message(api_clone: &AsyncApi, cloned_state: &Arc<GlobalStateMachine>, chat_id: i64, execution_param: &ExecutionParam) -> Result<SendResult, GenericError>{
+    async fn send_message(api_clone: &AsyncApi, cloned_state: &Arc<GlobalStateMachine>, chat_id: i64, execution_param: &ExecutionParam,
+                          temp_message_processor: Arc<dyn TemporaryMessageProvider>
+    ) -> Result<SendResult, GenericError>{
         let result: SendResult = match execution_param {
             ExecutionParam::SendMessage(message_params) => api_clone.send_message(&message_params).await?.into(),
             ExecutionParam::SendAndStoreMessage(message_params) => {
                 let result = api_clone.send_message(&message_params).await?;
-                let cloned_state = cloned_state.clone();
-                let mut locked = cloned_state.temp_messages.write().await;
-                locked.insert(result.result.message_id, message_params.text.to_string());
+                temp_message_processor.store_message(chat_id, message_params.text.to_string(), result.result.message_id as i64)?;
                 result.into()
             }
             ExecutionParam::SendMenu(menu_params) => {
