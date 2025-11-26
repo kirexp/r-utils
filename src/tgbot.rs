@@ -9,6 +9,7 @@ pub mod bot_structs {
     use crate::base::base::GenericResult;
 
 
+    #[derive(Clone, Debug)]
     pub struct TemporaryMessage { pub message_id: i64, pub text: String}
 
     #[async_trait]
