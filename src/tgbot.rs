@@ -378,7 +378,6 @@ pub mod bot_processing {
                             message: Option<Message>,
                             callback_query: Option<CallbackQuery>,
                             auth_processor: Arc<dyn AuthenticationProcessor+Send+Sync>,
-                            temp_message_processor: Arc<dyn TemporaryMessageProvider>
     ) -> Result<SendResult, GenericError> {
         let api_clone = api;
         let sm = Arc::clone(&state);
