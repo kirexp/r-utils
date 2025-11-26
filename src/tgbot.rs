@@ -227,18 +227,17 @@ pub mod bot_processing {
         pub async fn process_message(
             &self,
             msg: Option<Message>,
-            cq: Option<CallbackQuery>,
-            auth_processor: Arc<dyn AuthenticationProcessor>,
+            cq: Option<CallbackQuery>
         ) -> GenericResult<StepExecutionResult> {
             match (msg, cq) {
                 (Some(msg), _) => {
                     let file_content = msg.document;
                     let p = MessageWrapper { m_text: msg.text, chat_id: msg.chat.id, contact: msg.contact, user_name: msg.chat.username, file_content };
-                    Ok(self.process_message_sm(p, auth_processor).await?)
+                    Ok(self.process_message_sm(p).await?)
                 }
                 (_, Some(cq)) => {
                     let p = MessageWrapper { m_text: cq.data, chat_id: cq.from.id as i64, contact: None, user_name: cq.from.username, file_content: None };
-                    Ok(self.process_message_sm(p, auth_processor).await?)
+                    Ok(self.process_message_sm(p).await?)
                 }
                 _ => {
                     panic!()
@@ -247,8 +246,7 @@ pub mod bot_processing {
         }
 
         async fn process_message_sm(&self,
-                                    message_to_process: MessageWrapper,
-                                    auth_processor: Arc<dyn AuthenticationProcessor>,
+                                    message_to_process: MessageWrapper
         ) -> GenericResult<StepExecutionResult> {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
@@ -260,7 +258,7 @@ pub mod bot_processing {
                 let message_params = GetContactStep::execute(chat_id)?;
                 return Ok(StepExecutionResult::one(chat_id, ExecutionParam::SendMessage(message_params)));
             }
-            if let Some(value) = auth_processor.process(&message_to_process, chat_id.clone(), ).await {
+            if let Some(value) = self.auth_processor.process(&message_to_process, chat_id.clone(), ).await {
                 return value;
             }
             let message_text = message_to_process.m_text.clone();
@@ -390,7 +388,7 @@ pub mod bot_processing {
             tokio::spawn(async move {
                 let auth_processor = auth_processor.clone();
                 let cloned_state = cloned_state.clone();
-                let step_execution_result = sm.process_message(message, callback_query, auth_processor).await.unwrap();
+                let step_execution_result = sm.process_message(message, callback_query).await.unwrap();
                 for execution_param in step_execution_result.result {
                     let send_result = send_message(&api_clone, &cloned_state, step_execution_result.chat_id, &execution_param).await;
                     if let Err(error) = send_result {
