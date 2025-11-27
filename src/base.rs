@@ -9,7 +9,11 @@ pub mod base {
 
     #[derive(Debug, Error)]
     pub enum BotError {
-        #[error("wrong input error: {0}")]
+        #[error("Unknown Error: {1}")]
         UnknownError(i64, String),
+        #[error("BusinessError Error: {0}")]
+        BusinessError(i64, String),
+        #[error("ChatlessError: {0}")]
+        ChatlessError(String)
     }
 }
