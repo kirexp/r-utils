@@ -400,7 +400,15 @@ pub mod bot_processing {
                         }
                     },
                     Err(err) => {
-
+                        match err { BotError::UnknownError(chat_id, _) => {
+                            let error_response = ExecutionParam::SendMessage(
+                                SendMessageParams::builder().chat_id(chat_id.clone())
+                                    .text("Oops")
+                                    .build()
+                            );
+                            let send_result = send_message(&api_clone, &cloned_state, chat_id, &error_response).await
+                                .expect("SendMessage failed");
+                        } }
                     }
                 }
             });
