@@ -7,7 +7,7 @@ pub mod bot_structs {
     use frankenstein::{Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams, Message, MethodResponse, SendDocumentParams, SendMessageParams, SetMyCommandsParams};
     use regex::Regex;
     use serde::{Deserialize, Serialize};
-    use crate::base::base::GenericResult;
+    use crate::base::base::{BotResult, GenericResult};
 
 
     #[derive(Clone, Debug)]
@@ -133,7 +133,7 @@ pub mod bot_structs {
 
     #[async_trait]
     pub trait ProcessNext {
-        async fn process_next(&mut self, chat_id: i64, message: Option<String>, temp_message_processor: Arc<dyn TemporaryMessageProvider>) -> GenericResult<Step>;
+        async fn process_next(&mut self, chat_id: i64, message: Option<String>, temp_message_processor: Arc<dyn TemporaryMessageProvider>) -> BotResult<Step>;
     }
 
     pub trait ClonableStateMachine {
@@ -147,7 +147,7 @@ pub mod bot_structs {
 
     #[async_trait]
     pub trait FinishStateMachine {
-        async fn finish(&self) -> GenericResult<()>;
+        async fn finish(&self) -> BotResult<()>;
     }
 
 
@@ -162,7 +162,7 @@ pub mod bot_processing {
     use frankenstein::{BotCommandScope, BotCommand as BotMCommand, BotCommandScopeChat, CallbackQuery, KeyboardButton, Message, ReplyKeyboardMarkup, ReplyMarkup, SendMessageParams, SetMyCommandsParams};
     use tokio::sync::{Mutex, RwLock, RwLockReadGuard};
     use tracing::info;
-    use crate::base::base::{GenericError, GenericResult};
+    use crate::base::base::{BotError, BotResult, GenericError, GenericResult};
     use crate::tgbot::bot_structs::{BotCommand, ExecutionParam, MessageWrapper, ProcessStateMachine, SendResult, Step, StepExecutionResult, TemporaryMessageProvider, UserInfo};
 
     static mut SINGLETON_INSTANCE: Option<StateMachineRepo> = None;
@@ -193,14 +193,14 @@ pub mod bot_processing {
             Some(Arc::clone(potential_sm))
         }
 
-        pub async fn init_state_machine(&self, chat_id: i64, state_machine: impl ProcessStateMachine + Send + Sync + 'static) -> GenericResult<()> {
+        pub async fn init_state_machine(&self, chat_id: i64, state_machine: impl ProcessStateMachine + Send + Sync + 'static) -> BotResult<()> {
             let new_sm: Arc<Mutex<dyn ProcessStateMachine + Send + Sync>> = Arc::new(Mutex::new(state_machine));
             let mut write_state = self.state_machines.write().await;
             write_state.insert(chat_id, new_sm);
             Ok(())
         }
 
-        pub async fn complete_state_machine(&self, chat_id: i64) -> GenericResult<()> {
+        pub async fn complete_state_machine(&self, chat_id: i64) -> BotResult<()> {
             let mut write_state = self.state_machines.write().await;
             write_state.remove(&chat_id);
             Ok(())
@@ -228,7 +228,7 @@ pub mod bot_processing {
             &self,
             msg: Option<Message>,
             cq: Option<CallbackQuery>
-        ) -> GenericResult<StepExecutionResult> {
+        ) -> BotResult<StepExecutionResult> {
             match (msg, cq) {
                 (Some(msg), _) => {
                     let file_content = msg.document;
@@ -247,7 +247,7 @@ pub mod bot_processing {
 
         async fn process_message_sm(&self,
                                     message_to_process: MessageWrapper
-        ) -> GenericResult<StepExecutionResult> {
+        ) -> BotResult<StepExecutionResult> {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
             let sm_repo = StateMachineRepo::get_instance();
@@ -276,7 +276,10 @@ pub mod bot_processing {
 
             if let Some(mut active_sm) = sm_repo.check_active_task_sm(chat_id).await {
                 let mut active_sm = active_sm.lock().await;
-                let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone(), self.temp_message_processor.clone()).await?;
+                let sm_result = active_sm.process_next(chat_id, message_to_process.m_text.clone(), self.temp_message_processor.clone()).await
+                    .map_err(|e| {
+                        BotError::UnknownError(chat_id, e.to_string())
+                    })?;
                 let sm_step_data = match sm_result {
                     Step::Finit(result) => {
                         active_sm.finish().await?;
@@ -339,7 +342,7 @@ pub mod bot_processing {
     pub struct GetContactStep;
 
     impl GetContactStep {
-        pub fn execute(chat_id: i64) -> Result<SendMessageParams, String> {
+        pub fn execute(chat_id: i64) -> BotResult<SendMessageParams> {
             let mut keyboard: Vec<Vec<KeyboardButton>> = Vec::new();
             let mut vek: Vec<KeyboardButton> = Vec::new();
 
@@ -367,7 +370,7 @@ pub mod bot_processing {
 
     #[async_trait]
     pub trait AuthenticationProcessor: Sync + Send {
-        async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64) -> Option<GenericResult<StepExecutionResult>>;
+        async fn process(& self, message_to_process: & MessageWrapper, chat_id: i64) -> Option<BotResult<StepExecutionResult>>;
 
         async fn has_user(&self, user_id: &i64) -> bool;
     }
@@ -435,7 +438,7 @@ pub mod bot_processing {
         use std::collections::HashMap;
         use async_trait::async_trait;
         use tokio::sync::RwLockReadGuard;
-        use crate::base::base::GenericResult;
+        use crate::base::base::{BotResult, GenericResult};
         use crate::tgbot::bot_processing::AuthenticationProcessor;
         use crate::tgbot::bot_structs::{MessageWrapper, StepExecutionResult, UserInfo};
 
@@ -443,7 +446,7 @@ pub mod bot_processing {
 
         #[async_trait]
         impl AuthenticationProcessor for AuthProcessor {
-            async fn process(&self, message_to_process: &MessageWrapper, chat_id: i64) -> Option<GenericResult<StepExecutionResult>> {
+            async fn process(&self, message_to_process: &MessageWrapper, chat_id: i64) -> Option<BotResult<StepExecutionResult>> {
                 todo!()
             }
 
