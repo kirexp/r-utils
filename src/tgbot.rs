@@ -15,21 +15,21 @@ pub mod bot_structs {
 
     #[async_trait]
     pub trait TemporaryMessageProvider: Send + Sync {
-        async fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> GenericResult<()>;
+        async fn store_message(&self, chat_id: i64, message: String, message_id: i64) -> BotResult<()>;
         async fn get_message (&self, chat_id: i64) -> Option<TemporaryMessage>;
-        async fn remove_message(&self, chat_id: i64, message_id: i64) -> GenericResult<()>;
+        async fn remove_message(&self, chat_id: i64, message_id: i64) -> BotResult<()>;
     }
 
     pub struct BotCommand {
         command: String,
-        pub action: Box<dyn Fn(i64, String) -> Pin<Box<dyn Future<Output=GenericResult<Option<StepExecutionResult>>> + Send>> + Send + Sync>,
+        pub action: Box<dyn Fn(i64, String) -> Pin<Box<dyn Future<Output=BotResult<Option<StepExecutionResult>>> + Send>> + Send + Sync>,
     }
 
     impl BotCommand {
         pub fn new<TP: Into<String> + Send + 'static, F, Fut>(command: TP, action: F) -> Self
         where
             F: Fn(i64, String) -> Fut + Send + Sync + 'static,
-            Fut: Future<Output=GenericResult<Option<StepExecutionResult>>> + Send + 'static,
+            Fut: Future<Output=BotResult<Option<StepExecutionResult>>> + Send + 'static,
         {
             BotCommand {
                 command: command.into(),
