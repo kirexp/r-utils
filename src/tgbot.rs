@@ -160,13 +160,9 @@ pub mod bot_structs {
         ) -> BotResult<Step>;
     }
 
-    pub trait ClonableStateMachine {
-        fn clone_box(&self) -> Box<dyn ProcessStateMachine + Send>;
-    }
-
     #[async_trait]
     pub trait ProcessStateMachine:
-        GetStateMachineName + ProcessNext + FinishStateMachine + ClonableStateMachine + Send
+        GetStateMachineName + ProcessNext + FinishStateMachine + Send
     {
     }
 
