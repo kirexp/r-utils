@@ -351,7 +351,7 @@ pub mod bot_processing {
 
                 return Ok(sm_step_data);
             }
-            return match self.process_bot_commands(chat_id, &text).await {
+            return match self.process_bot_commands(chat_id, &text).await? {
                 Some(execution_result) => Ok(execution_result),
                 None => {
                     match self
@@ -386,25 +386,26 @@ pub mod bot_processing {
             &self,
             chat_id: i64,
             command: &String,
-        ) -> Option<StepExecutionResult> {
+        ) -> BotResult<Option<StepExecutionResult>> {
             for bot_command in &self.commands {
                 let command_arc = Arc::new(command.clone());
                 if bot_command.check_pattern(command_arc.as_str()) {
                     info!("Bot command was identified as {command_arc}. Starting execution");
-                    let result = (bot_command.action)(chat_id, command.clone()).await;
-                    return match result {
-                        Ok(r) => {
-                            info!("{command_arc}. Finishing execution");
-                            return r;
-                        }
-                        Err(err) => {
-                            info!("{command_arc}. Execution failed with error: {err}");
-                            None
-                        }
-                    };
+                    let result = (bot_command.action)(chat_id, command.clone()).await?;
+                    return Ok(result);
+                    // return match result {
+                    //     Ok(r) => {
+                    //         info!("{command_arc}. Finishing execution");
+                    //         return r;
+                    //     }
+                    //     Err(err) => {
+                    //         info!("{command_arc}. Execution failed with error: {err}");
+                    //         None
+                    //     }
+                    // };
                 }
             }
-            None
+            Err(BotError::BusinessError(chat_id, "Command not found".to_string()))
         }
     }
 
