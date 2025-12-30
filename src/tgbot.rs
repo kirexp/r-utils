@@ -246,6 +246,7 @@ pub mod bot_processing {
         pub auth_processor: Arc<dyn AuthenticationProcessor>,
         pub temp_message_processor: Arc<dyn TemporaryMessageProvider>,
         pub commands: Vec<BotCommand>,
+        pub api: Arc<AsyncApi>
     }
 
     impl GlobalStateMachine {
@@ -253,11 +254,13 @@ pub mod bot_processing {
             auth_processor: Arc<dyn AuthenticationProcessor>,
             temp_message_processor: Arc<dyn TemporaryMessageProvider>,
             commands: Vec<BotCommand>,
+            api: Arc<AsyncApi>
         ) -> Self {
             Self {
                 auth_processor,
                 temp_message_processor,
                 commands,
+                api,
             }
         }
 
@@ -393,16 +396,6 @@ pub mod bot_processing {
                     info!("Bot command was identified as {command_arc}. Starting execution");
                     let result = (bot_command.action)(chat_id, command.clone()).await?;
                     return Ok(result);
-                    // return match result {
-                    //     Ok(r) => {
-                    //         info!("{command_arc}. Finishing execution");
-                    //         return r;
-                    //     }
-                    //     Err(err) => {
-                    //         info!("{command_arc}. Execution failed with error: {err}");
-                    //         None
-                    //     }
-                    // };
                 }
             }
             Err(BotError::BusinessError(chat_id, "Command not found".to_string()))
