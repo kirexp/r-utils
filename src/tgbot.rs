@@ -446,7 +446,7 @@ pub mod bot_processing {
     use tracing::error;
 
     pub fn process_message(
-        api: AsyncApi,
+        api: Arc<AsyncApi>,
         state: &Arc<GlobalStateMachine>,
         message: Option<Message>,
         callback_query: Option<CallbackQuery>,
@@ -462,7 +462,7 @@ pub mod bot_processing {
                     Ok(result) => {
                         for execution_param in result.result {
                             let send_result = send_message(
-                                &api_clone,
+                                api_clone.clone(),
                                 &cloned_state,
                                 result.chat_id,
                                 &execution_param,
@@ -483,7 +483,7 @@ pub mod bot_processing {
                                     .build(),
                             );
                             let send_result =
-                                send_message(&api_clone, &cloned_state, chat_id, &error_response)
+                                send_message(api_clone.clone(), &cloned_state, chat_id, &error_response)
                                     .await
                                     .expect("SendMessage failed");
                         }
@@ -496,7 +496,7 @@ pub mod bot_processing {
     }
 
     async fn send_message(
-        api_clone: &AsyncApi,
+        api_clone: Arc<AsyncApi>,
         cloned_state: &Arc<GlobalStateMachine>,
         chat_id: i64,
         execution_param: &ExecutionParam,
