@@ -480,9 +480,12 @@ pub mod bot_processing {
                             let error_response = ExecutionParam::SendMessage(
                                 SendMessageParams::builder()
                                     .chat_id(chat_id.clone())
-                                    .text(error_text)
+                                    .text(error_text.clone())
                                     .build(),
                             );
+
+                            error!("Error: {:?}", error_text);
+
                             let send_result =
                                 send_message(api_clone.clone(), &cloned_state, chat_id, &error_response)
                                     .await
