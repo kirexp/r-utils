@@ -168,7 +168,7 @@ pub mod bot_structs {
 
     #[async_trait]
     pub trait FinishStateMachine {
-        async fn finish(&self) -> BotResult<()>;
+        async fn finish(&self, context: Arc<GlobalStateMachine>) -> BotResult<()>;
     }
 }
 
@@ -268,6 +268,7 @@ pub mod bot_processing {
             &self,
             msg: Option<Message>,
             cq: Option<CallbackQuery>,
+            context: Arc<GlobalStateMachine>
         ) -> BotResult<StepExecutionResult> {
             match (msg, cq) {
                 (Some(msg), _) => {
@@ -279,7 +280,7 @@ pub mod bot_processing {
                         user_name: msg.chat.username,
                         file_content,
                     };
-                    Ok(self.process_message_sm(p).await?)
+                    Ok(self.process_message_sm(p, context).await?)
                 }
                 (_, Some(cq)) => {
                     let p = MessageWrapper {
@@ -289,7 +290,7 @@ pub mod bot_processing {
                         user_name: cq.from.username,
                         file_content: None,
                     };
-                    Ok(self.process_message_sm(p).await?)
+                    Ok(self.process_message_sm(p, context).await?)
                 }
                 _ => {
                     panic!()
@@ -300,6 +301,7 @@ pub mod bot_processing {
         async fn process_message_sm(
             &self,
             message_to_process: MessageWrapper,
+            state: Arc<GlobalStateMachine>
         ) -> BotResult<StepExecutionResult> {
             let chat_id = message_to_process.chat_id;
             let text = message_to_process.m_text.clone().unwrap_or(String::new());
@@ -345,7 +347,7 @@ pub mod bot_processing {
 
                 let sm_step_data = match sm_result {
                     Step::Finit(result) => {
-                        active_sm.finish().await?;
+                        active_sm.finish(state).await?;
                         sm_repo.complete_state_machine(chat_id).await?;
                         result
                     }
@@ -447,7 +449,7 @@ pub mod bot_processing {
 
     pub fn process_message(
         api: Arc<AsyncApi>,
-        state: &Arc<GlobalStateMachine>,
+        state: Arc<GlobalStateMachine>,
         message: Option<Message>,
         callback_query: Option<CallbackQuery>,
     ) -> Result<SendResult, GenericError> {
@@ -457,7 +459,7 @@ pub mod bot_processing {
             let cloned_state = state.clone();
             tokio::spawn(async move {
                 let cloned_state = cloned_state.clone();
-                let step_execution_result = sm.process_message(message, callback_query).await;
+                let step_execution_result = sm.process_message(message, callback_query, state).await;
                 match step_execution_result {
                     Ok(result) => {
                         for execution_param in result.result {
