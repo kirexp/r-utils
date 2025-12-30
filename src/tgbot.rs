@@ -448,12 +448,11 @@ pub mod bot_processing {
     use tracing::error;
 
     pub fn process_message(
-        api: Arc<AsyncApi>,
         state: Arc<GlobalStateMachine>,
         message: Option<Message>,
         callback_query: Option<CallbackQuery>,
     ) -> Result<SendResult, GenericError> {
-        let api_clone = api;
+        let api_clone = state.api.clone();
         let sm = Arc::clone(&state);
         {
             let cloned_state = state.clone();
