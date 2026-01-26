@@ -2,10 +2,7 @@
 pub mod bot_structs {
     use crate::base::base::{BotResult, GenericResult};
     use async_trait::async_trait;
-    use frankenstein::{
-        Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams,
-        Message, MethodResponse, SendDocumentParams, SendMessageParams, SetMyCommandsParams,
-    };
+    use frankenstein::{Contact, DeleteMessageParams, Document, EditMessageResponse, EditMessageTextParams, Message, MethodResponse, PhotoSize, SendDocumentParams, SendMessageParams, SetMyCommandsParams};
     use regex::Regex;
     use serde::{Deserialize, Serialize};
     use std::future::Future;
@@ -125,6 +122,7 @@ pub mod bot_structs {
         pub contact: Option<Box<Contact>>,
         pub user_name: Option<String>,
         pub file_content: Option<Box<Document>>,
+        pub photo: Option<Vec<PhotoSize>>
     }
 
     #[derive(Serialize, Deserialize, Debug)]
@@ -279,6 +277,7 @@ pub mod bot_processing {
                         contact: msg.contact,
                         user_name: msg.chat.username,
                         file_content,
+                        photo: msg.photo
                     };
                     Ok(self.process_message_sm(p, context).await?)
                 }
@@ -289,6 +288,7 @@ pub mod bot_processing {
                         contact: None,
                         user_name: cq.from.username,
                         file_content: None,
+                        photo: None
                     };
                     Ok(self.process_message_sm(p, context).await?)
                 }
