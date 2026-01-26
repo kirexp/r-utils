@@ -155,7 +155,7 @@ pub mod bot_structs {
         async fn process_next(
             &mut self,
             chat_id: i64,
-            message: Option<String>,
+            message: MessageWrapper,
             temp_message_processor: &GlobalStateMachine,
         ) -> BotResult<Step>;
     }
@@ -339,7 +339,7 @@ pub mod bot_processing {
                 let sm_result = active_sm
                     .process_next(
                         chat_id,
-                        message_to_process.m_text.clone(),
+                        message_to_process,
                         &self
                     )
                     .await
